@@ -1,0 +1,32 @@
+insert into public.members (id, name, phone, zip_code, address, address_detail, member_type)
+select u.id, v.name, v.phone, v.zip_code, v.address, v.address_detail, v.member_type
+from auth.users u
+join (values
+  ('seller1@example.com', '김판매', '010-1000-0001', '06234', '서울시 강남구 테헤란로 1', '3층', 'seller'),
+  ('buyer1@example.com',  '이구매', '010-2000-0002', '04524', '서울시 중구 세종대로 2', '101호', 'buyer'),
+  ('buyer2@example.com',  '박구매', '010-3000-0003', '48058', '부산시 해운대구 센텀로 3', null, 'buyer')
+) as v(email, name, phone, zip_code, address, address_detail, member_type)
+  on u.email = v.email
+on conflict (id) do nothing;
+INSERT 0 3
+insert into public.products (seller_id, name, description, price, stock)
+select m.id, v.name, v.description, v.price, v.stock
+from public.members m
+cross join (values
+  ('무선 키보드', '저소음 갈축', 120000, 10),
+  ('무선 마우스', '버티컬 그립', 55000, 20),
+  ('모니터 받침대', '원목', 39000, 3)
+) as v(name, description, price, stock)
+where m.member_type = 'seller'
+on conflict on constraint products_seller_name_uq do nothing;
+INSERT 0 3
+select m.name as seller, p.name, p.price, p.stock
+from public.products p join public.members m on m.id = p.seller_id
+order by p.price desc;
+ seller |     name      | price  | stock 
+--------+---------------+--------+-------
+ 김판매 | 무선 키보드   | 120000 |    10
+ 김판매 | 무선 마우스   |  55000 |    20
+ 김판매 | 모니터 받침대 |  39000 |     3
+(3 rows)
+

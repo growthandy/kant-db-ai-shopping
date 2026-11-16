@@ -1,0 +1,19 @@
+[project]
+name = "db-ai-shopping"
+version = "0.1.0"
+description = "KANT DB & AI 평가 과제 — Supabase 쇼핑몰 3테이블 CRUD"
+readme = "README.md"
+authors = [
+    { name = "growthandy", email = "andy.growthbridge@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "python-dotenv>=1.2.4",
+    "supabase>=2.34.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = []

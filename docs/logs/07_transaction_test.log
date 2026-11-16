@@ -1,0 +1,101 @@
+select name, stock from public.products order by name;
+     name      | stock 
+---------------+-------
+ 모니터 받침대 |     3
+ 무선 마우스   |    20
+ 무선 키보드   |    10
+(3 rows)
+
+select count(*) as order_count from public.orders;
+ order_count 
+-------------
+           0
+(1 row)
+
+begin;
+BEGIN
+insert into public.orders (order_no, user_id, receiver_name, receiver_phone, address)
+  select 'TX-A-0001', m.id, '이구매', '010-2000-0002', '서울시 중구 세종대로 2'
+  from public.members m join auth.users u on u.id = m.id
+  where u.email = 'buyer1@example.com';
+INSERT 0 1
+insert into public.order_items (order_id, product_id, item_name, item_price, quantity)
+  select o.id, p.id, p.name, p.price, 2
+  from public.orders o, public.products p
+  where o.order_no = 'TX-A-0001' and p.name = '무선 키보드';
+INSERT 0 1
+update public.products set stock = stock - 2 where name = '무선 키보드';
+UPDATE 1
+update public.orders o
+     set total_price = (select sum(item_price * quantity) from public.order_items where order_id = o.id)
+   where o.order_no = 'TX-A-0001';
+UPDATE 1
+commit;
+COMMIT
+select o.order_no, o.total_price, oi.item_name, oi.quantity, p.stock
+from public.orders o
+join public.order_items oi on oi.order_id = o.id
+join public.products p on p.id = oi.product_id
+where o.order_no = 'TX-A-0001';
+ order_no  | total_price |  item_name  | quantity | stock 
+-----------+-------------+-------------+----------+-------
+ TX-A-0001 |      240000 | 무선 키보드 |        2 |     8
+(1 row)
+
+begin;
+BEGIN
+update public.products set price = 0;
+UPDATE 3
+select name, price from public.products order by name;
+     name      | price 
+---------------+-------
+ 모니터 받침대 |     0
+ 무선 마우스   |     0
+ 무선 키보드   |     0
+(3 rows)
+
+rollback;
+ROLLBACK
+select name, price from public.products order by name;
+     name      | price  
+---------------+--------
+ 모니터 받침대 |  39000
+ 무선 마우스   |  55000
+ 무선 키보드   | 120000
+(3 rows)
+
+begin;
+BEGIN
+insert into public.orders (order_no, user_id, receiver_name, receiver_phone, address)
+  select 'TX-C-0001', m.id, '박구매', '010-3000-0003', '부산시 해운대구 센텀로 3'
+  from public.members m join auth.users u on u.id = m.id
+  where u.email = 'buyer2@example.com';
+INSERT 0 1
+insert into public.order_items (order_id, product_id, item_name, item_price, quantity)
+  select o.id, p.id, p.name, p.price, 5
+  from public.orders o, public.products p
+  where o.order_no = 'TX-C-0001' and p.name = '모니터 받침대';
+INSERT 0 1
+update public.products set stock = stock - 5 where name = '모니터 받침대';
+commit;
+ERROR:  new row for relation "products" violates check constraint "products_stock_chk"
+DETAIL:  Failing row contains (d4c4e43c-bae3-40f4-ba3c-c6aa13444e0a, 52a8466c-7df6-4c42-8984-e099db4a0a5f, 모니터 받침대, 원목, 39000, -2, 2026-11-16 00:55:02.086822+00, 2026-11-16 00:55:02.205693+00, null).
+ROLLBACK
+rollback;
+WARNING:  there is no transaction in progress
+ROLLBACK
+select count(*) as should_be_zero from public.orders where order_no = 'TX-C-0001';
+ should_be_zero 
+----------------
+              0
+(1 row)
+
+select name, stock as should_be_3 from public.products where name = '모니터 받침대';
+     name      | should_be_3 
+---------------+-------------
+ 모니터 받침대 |           3
+(1 row)
+
+delete from public.products where name = '무선 키보드';
+ERROR:  update or delete on table "products" violates foreign key constraint "order_items_product_id_fk" on table "order_items"
+DETAIL:  Key (id)=(7c6e71fe-ebe6-45e1-9dcb-18fd4e67b5a5) is still referenced from table "order_items".

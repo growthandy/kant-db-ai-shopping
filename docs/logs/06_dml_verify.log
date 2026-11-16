@@ -1,0 +1,142 @@
+select count(*) as before_count from public.products;
+ before_count 
+--------------
+            3
+(1 row)
+
+insert into public.products (seller_id, name, price, stock)
+select id, 'USB 허브', 25000, 15 from public.members where member_type = 'seller'
+returning id, name, price, stock, created_at;
+                  id                  |   name   | price | stock |          created_at           
+--------------------------------------+----------+-------+-------+-------------------------------
+ 67b23f33-3925-4ec3-b449-efff98762501 | USB 허브 | 25000 |    15 | 2026-11-16 00:55:02.133622+00
+(1 row)
+
+INSERT 0 1
+select count(*) as after_count from public.products;
+ after_count 
+-------------
+           4
+(1 row)
+
+select name, description from public.products where name = 'USB 허브';
+   name   |        description         
+----------+----------------------------
+ USB 허브 | 상품 설명을 입력해 주세요.
+(1 row)
+
+select id, name, price, updated_at from public.products where name = 'USB 허브';
+                  id                  |   name   | price |          updated_at           
+--------------------------------------+----------+-------+-------------------------------
+ 67b23f33-3925-4ec3-b449-efff98762501 | USB 허브 | 25000 | 2026-11-16 00:55:02.133622+00
+(1 row)
+
+update public.products
+   set price = 22000
+ where name = 'USB 허브'
+returning name, price, updated_at;
+   name   | price |          updated_at           
+----------+-------+-------------------------------
+ USB 허브 | 22000 | 2026-11-16 00:55:02.136393+00
+(1 row)
+
+UPDATE 1
+select name, price, created_at, updated_at,
+       updated_at > created_at as trigger_worked
+from public.products where name = 'USB 허브';
+   name   | price |          created_at           |          updated_at           | trigger_worked 
+----------+-------+-------------------------------+-------------------------------+----------------
+ USB 허브 | 22000 | 2026-11-16 00:55:02.133622+00 | 2026-11-16 00:55:02.136393+00 | t
+(1 row)
+
+select id, name from public.products where name = 'USB 허브';
+                  id                  |   name   
+--------------------------------------+----------
+ 67b23f33-3925-4ec3-b449-efff98762501 | USB 허브
+(1 row)
+
+delete from public.products where name = 'USB 허브' returning id, name;
+                  id                  |   name   
+--------------------------------------+----------
+ 67b23f33-3925-4ec3-b449-efff98762501 | USB 허브
+(1 row)
+
+DELETE 1
+select count(*) as should_be_zero from public.products where name = 'USB 허브';
+ should_be_zero 
+----------------
+              0
+(1 row)
+
+insert into public.products (seller_id, name, price)
+select id, null, 1000 from public.members where member_type = 'seller';
+ERROR:  null value in column "name" of relation "products" violates not-null constraint
+DETAIL:  Failing row contains (ad1fe8d9-5bd9-4186-ae8c-c546184337dd, 52a8466c-7df6-4c42-8984-e099db4a0a5f, null, 상품 설명을 입력해 주세요., 1000, 0, 2026-11-16 00:55:02.139004+00, 2026-11-16 00:55:02.139004+00, null).
+insert into public.products (seller_id, name, price)
+select id, '음수 상품', -500 from public.members where member_type = 'seller';
+ERROR:  new row for relation "products" violates check constraint "products_price_chk"
+DETAIL:  Failing row contains (bb0644c9-e431-4192-a82b-b073b2d4bd9b, 52a8466c-7df6-4c42-8984-e099db4a0a5f, 음수 상품, 상품 설명을 입력해 주세요., -500, 0, 2026-11-16 00:55:02.139426+00, 2026-11-16 00:55:02.139426+00, null).
+insert into public.products (seller_id, name, price)
+values ('00000000-0000-0000-0000-000000000000', '유령 상품', 1000);
+ERROR:  insert or update on table "products" violates foreign key constraint "products_seller_id_fk"
+DETAIL:  Key (seller_id)=(00000000-0000-0000-0000-000000000000) is not present in table "members".
+insert into public.products (seller_id, name, price)
+select id, '무선 키보드', 1 from public.members where member_type = 'seller';
+update public.members set member_type = 'admin' where name = '이구매';
+ERROR:  duplicate key value violates unique constraint "products_seller_name_uq"
+DETAIL:  Key (seller_id, name)=(52a8466c-7df6-4c42-8984-e099db4a0a5f, 무선 키보드) already exists.
+ERROR:  new row for relation "members" violates check constraint "members_member_type_chk"
+DETAIL:  Failing row contains (576476b8-6f30-49ac-b112-787e5149992e, 이구매, 010-2000-0002, 04524, 서울시 중구 세종대로 2, 101호, admin, 2026-11-16 00:55:02.084967+00, 2026-11-16 00:55:02.140257+00, null, f).
+select count(*) from public.products where name in ('음수 상품', '유령 상품');
+ count 
+-------
+     0
+(1 row)
+
+select member_type from public.members where name = '이구매';
+ member_type 
+-------------
+ buyer
+(1 row)
+
+select tc.table_name,
+       tc.constraint_name,
+       tc.constraint_type,
+       kcu.column_name,
+       ccu.table_schema || '.' || ccu.table_name || '.' || ccu.column_name as references_to
+from information_schema.table_constraints tc
+left join information_schema.key_column_usage kcu
+       on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema
+left join information_schema.constraint_column_usage ccu
+       on ccu.constraint_name = tc.constraint_name and tc.constraint_type = 'FOREIGN KEY'
+where tc.table_schema = 'public'
+  and tc.table_name in ('members', 'products', 'orders', 'order_items')
+  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK')
+  and tc.constraint_name not like '%_not_null'
+order by tc.table_name, tc.constraint_type, tc.constraint_name;
+ table_name  |       constraint_name        | constraint_type | column_name |   references_to    
+-------------+------------------------------+-----------------+-------------+--------------------
+ members     | members_member_type_chk      | CHECK           |             | 
+ members     | members_phone_chk            | CHECK           |             | 
+ members     | members_id_fk                | FOREIGN KEY     | id          | 
+ members     | members_pk                   | PRIMARY KEY     | id          | 
+ order_items | order_items_item_price_chk   | CHECK           |             | 
+ order_items | order_items_quantity_chk     | CHECK           |             | 
+ order_items | order_items_order_id_fk      | FOREIGN KEY     | order_id    | public.orders.id
+ order_items | order_items_product_id_fk    | FOREIGN KEY     | product_id  | public.products.id
+ order_items | order_items_pk               | PRIMARY KEY     | id          | 
+ order_items | order_items_order_product_uq | UNIQUE          | order_id    | 
+ order_items | order_items_order_product_uq | UNIQUE          | product_id  | 
+ orders      | orders_order_status_chk      | CHECK           |             | 
+ orders      | orders_total_price_chk       | CHECK           |             | 
+ orders      | orders_user_id_fk            | FOREIGN KEY     | user_id     | public.members.id
+ orders      | orders_pk                    | PRIMARY KEY     | id          | 
+ orders      | orders_order_no_uq           | UNIQUE          | order_no    | 
+ products    | products_price_chk           | CHECK           |             | 
+ products    | products_stock_chk           | CHECK           |             | 
+ products    | products_seller_id_fk        | FOREIGN KEY     | seller_id   | public.members.id
+ products    | products_pk                  | PRIMARY KEY     | id          | 
+ products    | products_seller_name_uq      | UNIQUE          | name        | 
+ products    | products_seller_name_uq      | UNIQUE          | seller_id   | 
+(22 rows)
+

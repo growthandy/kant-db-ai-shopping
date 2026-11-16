@@ -1,0 +1,113 @@
+create or replace function public.create_order(
+  p_receiver_name  text,
+  p_receiver_phone text,
+  p_address        text,
+  p_delivery_memo  text,
+  p_items          jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id     uuid := auth.uid();
+  v_order_id    uuid;
+  v_order_no    text;
+  v_total_price integer := 0;
+  v_item        record;
+  v_product     record;
+begin
+  if v_user_id is null then
+    raise exception '로그인이 필요합니다.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from members where id = v_user_id and deleted_at is null) then
+    raise exception '회원 프로필이 없거나 탈퇴한 회원입니다.';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception '주문할 상품이 없습니다.';
+  end if;
+
+  v_order_no := to_char(clock_timestamp(), 'YYYYMMDDHH24MISSMS') || '-' || substr(md5(random()::text), 1, 4);
+
+  insert into orders (order_no, user_id, receiver_name, receiver_phone, address, delivery_memo)
+  values (v_order_no, v_user_id, p_receiver_name, p_receiver_phone, p_address, p_delivery_memo)
+  returning id into v_order_id;
+
+  for v_item in
+    select (elem ->> 'product_id')::uuid as product_id,
+           (elem ->> 'quantity')::integer as quantity
+    from jsonb_array_elements(p_items) as elem
+  loop
+    if v_item.quantity is null or v_item.quantity <= 0 then
+      raise exception '주문 수량은 1개 이상이어야 합니다.';
+    end if;
+
+    update products
+       set stock = stock - v_item.quantity
+     where id = v_item.product_id
+       and deleted_at is null
+       and stock >= v_item.quantity
+    returning id, name, price into v_product;
+
+    if not found then
+      raise exception '재고 부족 또는 판매 중이 아닌 상품입니다. (product_id: %)', v_item.product_id;
+    end if;
+
+    insert into order_items (order_id, product_id, item_name, item_price, quantity)
+    values (v_order_id, v_product.id, v_product.name, v_product.price, v_item.quantity);
+
+    v_total_price := v_total_price + v_product.price * v_item.quantity;
+  end loop;
+
+  update orders set total_price = v_total_price where id = v_order_id;
+
+  return jsonb_build_object(
+    'order_id', v_order_id,
+    'order_no', v_order_no,
+    'total_price', v_total_price
+  );
+end;
+$$;
+CREATE FUNCTION
+create or replace function public.cancel_order(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order orders%rowtype;
+begin
+  select * into v_order
+    from orders
+   where id = p_order_id and user_id = auth.uid()
+   for update;
+
+  if not found then
+    raise exception '주문이 없거나 본인 주문이 아닙니다.';
+  end if;
+  if v_order.order_status not in ('READY', 'ORDER') then
+    raise exception '결제 이후 단계의 주문은 취소할 수 없습니다. (현재 상태: %)', v_order.order_status;
+  end if;
+
+  update products p
+     set stock = p.stock + oi.quantity
+    from order_items oi
+   where oi.order_id = p_order_id
+     and oi.product_id = p.id;
+
+  delete from orders where id = p_order_id;
+
+  return jsonb_build_object('order_id', p_order_id, 'cancelled', true);
+end;
+$$;
+CREATE FUNCTION
+revoke execute on function public.create_order(text, text, text, text, jsonb) from public, anon;
+REVOKE
+revoke execute on function public.cancel_order(uuid) from public, anon;
+REVOKE
+grant execute on function public.create_order(text, text, text, text, jsonb) to authenticated;
+GRANT
+grant execute on function public.cancel_order(uuid) to authenticated;
+GRANT

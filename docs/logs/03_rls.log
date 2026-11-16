@@ -1,0 +1,101 @@
+alter table public.members     enable row level security;
+ALTER TABLE
+alter table public.products    enable row level security;
+ALTER TABLE
+alter table public.orders      enable row level security;
+ALTER TABLE
+alter table public.order_items enable row level security;
+ALTER TABLE
+grant select, insert on public.members to authenticated;
+GRANT
+grant select, insert, update, delete on public.products to authenticated;
+GRANT
+grant select on public.orders to authenticated;
+GRANT
+grant select on public.order_items to authenticated;
+GRANT
+create policy members_select_own on public.members
+  for select to authenticated
+  using (id = (select auth.uid()));
+CREATE POLICY
+create policy members_insert_own on public.members
+  for insert to authenticated
+  with check (id = (select auth.uid()) and member_type = 'buyer');
+CREATE POLICY
+create policy members_update_own on public.members
+  for update to authenticated
+  using (id = (select auth.uid()))
+  with check (id = (select auth.uid()));
+CREATE POLICY
+revoke update on public.members from authenticated, anon;
+REVOKE
+grant update (name, phone, zip_code, address, address_detail, marketing_agreed, deleted_at)
+  on public.members to authenticated;
+GRANT
+create policy products_select_active on public.products
+  for select to authenticated
+  using (deleted_at is null or seller_id = (select auth.uid()));
+CREATE POLICY
+create policy products_insert_seller on public.products
+  for insert to authenticated
+  with check (
+    seller_id = (select auth.uid())
+    and exists (
+      select 1 from public.members m
+      where m.id = (select auth.uid()) and m.member_type = 'seller' and m.deleted_at is null
+    )
+  );
+CREATE POLICY
+create policy products_update_seller on public.products
+  for update to authenticated
+  using (seller_id = (select auth.uid()))
+  with check (seller_id = (select auth.uid()));
+CREATE POLICY
+create policy products_delete_seller on public.products
+  for delete to authenticated
+  using (seller_id = (select auth.uid()));
+CREATE POLICY
+create policy orders_select_own on public.orders
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+CREATE POLICY
+create policy orders_update_own_before_payment on public.orders
+  for update to authenticated
+  using (user_id = (select auth.uid()) and order_status in ('READY', 'ORDER'))
+  with check (user_id = (select auth.uid()));
+CREATE POLICY
+revoke update on public.orders from authenticated, anon;
+REVOKE
+grant update (receiver_name, receiver_phone, address, delivery_memo) on public.orders to authenticated;
+GRANT
+create policy order_items_select_own on public.order_items
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.orders o
+      where o.id = order_items.order_id and o.user_id = (select auth.uid())
+    )
+  );
+CREATE POLICY
+select tablename, policyname, cmd, roles, qual as using_expr, with_check
+from pg_policies
+where schemaname = 'public'
+order by tablename, cmd;
+  tablename  |            policyname            |  cmd   |      roles      |                                                using_expr                                                |                                                    with_check                                                     
+-------------+----------------------------------+--------+-----------------+----------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------
+ members     | members_insert_own               | INSERT | {authenticated} |                                                                                                          | ((id = ( SELECT auth.uid() AS uid)) AND (member_type = 'buyer'::text))
+ members     | members_select_own               | SELECT | {authenticated} | (id = ( SELECT auth.uid() AS uid))                                                                       | 
+ members     | members_update_own               | UPDATE | {authenticated} | (id = ( SELECT auth.uid() AS uid))                                                                       | (id = ( SELECT auth.uid() AS uid))
+ order_items | order_items_select_own           | SELECT | {authenticated} | (EXISTS ( SELECT 1                                                                                      +| 
+             |                                  |        |                 |    FROM orders o                                                                                        +| 
+             |                                  |        |                 |   WHERE ((o.id = order_items.order_id) AND (o.user_id = ( SELECT auth.uid() AS uid)))))                  | 
+ orders      | orders_select_own                | SELECT | {authenticated} | (user_id = ( SELECT auth.uid() AS uid))                                                                  | 
+ orders      | orders_update_own_before_payment | UPDATE | {authenticated} | ((user_id = ( SELECT auth.uid() AS uid)) AND (order_status = ANY (ARRAY['READY'::text, 'ORDER'::text]))) | (user_id = ( SELECT auth.uid() AS uid))
+ products    | products_delete_seller           | DELETE | {authenticated} | (seller_id = ( SELECT auth.uid() AS uid))                                                                | 
+ products    | products_insert_seller           | INSERT | {authenticated} |                                                                                                          | ((seller_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1                                                +
+             |                                  |        |                 |                                                                                                          |    FROM members m                                                                                                +
+             |                                  |        |                 |                                                                                                          |   WHERE ((m.id = ( SELECT auth.uid() AS uid)) AND (m.member_type = 'seller'::text) AND (m.deleted_at IS NULL)))))
+ products    | products_select_active           | SELECT | {authenticated} | ((deleted_at IS NULL) OR (seller_id = ( SELECT auth.uid() AS uid)))                                      | 
+ products    | products_update_seller           | UPDATE | {authenticated} | (seller_id = ( SELECT auth.uid() AS uid))                                                                | (seller_id = ( SELECT auth.uid() AS uid))
+(10 rows)
+
